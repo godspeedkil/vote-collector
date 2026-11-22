@@ -8,12 +8,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <div id="app"><p class="muted">Loading…</p></div>
-<script src="config.js"></script>
-<script src="common.js"></script>
+<script src="config.js?v=4"></script>
+<script src="common.js?v=4"></script>
 <script>
 (function () {
   "use strict";
@@ -32,6 +32,7 @@
     if (key.length > 60) opt.headers = { Authorization: "Bearer " + key }; else u.searchParams.set("api_key", key);
     return fetch(u.toString(), opt).then(function (r) {
       if (r.status === 401) throw { code: "key" };
+      if (r.status === 404) throw { code: "missing" };
       if (!r.ok) throw { code: "http" };
       return r.json();
     });
@@ -65,22 +66,46 @@
     return { id: r.id, kind: kind, ref: kind + "-" + r.id, title: str(tv ? r.name : r.title), year: num(String((tv ? r.first_air_date : r.release_date) || "").slice(0, 4)), poster: str(r.poster_path), overview: str(r.overview), pop: +r.popularity || 0 };
   }
   function norm(x) { return String(x).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
-  function searchFilm(title, year) {
-    // Films and series are searched together, then listed most popular first.
+  // Films and series are searched separately and both are always shown (up to five of each), so a popular film can't push a series off the list.
+  function searchKind(kind, title, year) {
     var run = function (y) {
-      return Promise.all([tmdb("/search/movie", { query: title, year: y, include_adult: "false" }), tmdb("/search/tv", { query: title, first_air_date_year: y, include_adult: "false" })]).then(function (a) {
-        return (a[0].results || []).slice(0, 6).map(function (r) { return slim(r, "movie"); })
-          .concat((a[1].results || []).slice(0, 6).map(function (r) { return slim(r, "tv"); }))
-          .sort(function (x, z) { return z.pop - x.pop; }).slice(0, 8);
-      });
+      var q = { query: title, include_adult: "false" };
+      if (y) q[kind === "tv" ? "first_air_date_year" : "year"] = y;
+      return tmdb("/search/" + kind, q).then(function (r) { return (r.results || []).slice(0, 5).map(function (x) { return slim(x, kind); }); });
     };
     return run(year).then(function (res) { return res.length || !year ? res : run(null); });
+  }
+  function searchBoth(title, year) {
+    return Promise.all([searchKind("movie", title, year), searchKind("tv", title, year)]).then(function (a) { return a[0].concat(a[1]).sort(function (x, z) { return z.pop - x.pop; }); });
+  }
+  function searchFilm(title, year) {
+    return searchBoth(title, year).then(function (res) {
+      // Nothing for the whole title: try each part of a "Franchise: Subtitle" style title on its own.
+      var parts = title.split(/\s*[:–—]\s*|\s+-\s+/).filter(function (x) { return x.length > 2; });
+      if (res.length || parts.length < 2) return res;
+      return parts.reduce(function (chain, part) {
+        return chain.then(function (acc) { return searchBoth(part, year).then(function (r) { return acc.concat(r.filter(function (x) { return !acc.some(function (y) { return y.ref === x.ref; }); })); }); });
+      }, Promise.resolve([])).then(function (all) { return all.slice(0, 10); });
+    });
+  }
+  // A pasted TMDB page link (or "tv 103445" / "movie 949") fetches exactly that title, with no searching.
+  function linkRef(text) {
+    var m = /themoviedb\.org\/(movie|tv)\/(\d+)/i.exec(text) || /^\s*(movie|tv)[\/:\s]+(\d+)\s*$/i.exec(text);
+    return m ? { kind: m[1].toLowerCase(), id: m[2] } : null;
+  }
+  function lookup(text) {
+    var l = linkRef(text), p;
+    if (l) return tmdb("/" + l.kind + "/" + l.id, {}).then(function (d) { var r = slim(d, l.kind); return { title: r.title, year: r.year, results: [r], linked: true }; },
+      function (e) { if (e && e.code === "missing") return { title: text, year: null, results: [], linked: false }; throw e; });
+    p = parseLine(text);
+    return searchFilm(p.title, p.year).then(function (res) { return { title: p.title, year: p.year, results: res, linked: false }; });
   }
   // Pre-selects a film only when exactly one result has the same title (and the same year, if you gave one). Anything else waits for your pick.
   function judge(row) {
     var sameTitle = row.results.filter(function (r) { return norm(r.title) === norm(row.title); });
     var same = sameTitle.filter(function (r) { return !row.year || r.year === row.year; });
-    if (!row.results.length) { row.status = "none"; row.choice = null; }
+    if (row.linked && row.results.length) { row.status = "link"; row.choice = row.results[0].ref; }
+    else if (!row.results.length) { row.status = "none"; row.choice = null; }
     else if (same.length === 1 && (row.year || sameTitle.length === 1)) { row.status = "sure"; row.choice = same[0].ref; }
     else { row.status = "pick"; row.choice = null; }
   }
@@ -95,15 +120,15 @@
       if (i >= lines.length) { busy = ""; review = rows; render(); return; }
       busy = "Searching " + (i + 1) + " of " + lines.length + "…"; render();
       var keep = document.getElementById("e-add"); if (keep) keep.value = lines.join("\n");
-      var p = parseLine(lines[i]), row = { line: lines[i], query: lines[i], title: p.title, year: p.year, results: [], status: "none", choice: null };
-      searchFilm(p.title, p.year).then(function (res) { row.results = res; judge(row); rows.push(row); i++; next(); },
+      var row = { line: lines[i], query: lines[i], title: lines[i], year: null, results: [], status: "none", choice: null, linked: false };
+      lookup(lines[i]).then(function (f) { row.title = f.title; row.year = f.year; row.results = f.results; row.linked = f.linked; judge(row); rows.push(row); i++; next(); },
         function (e) { busy = ""; msg = tmdbError(e); render(); var b = document.getElementById("e-add"); if (b) b.value = lines.join("\n"); });
     })();
   }
   function searchAgain(row) {
-    var p = parseLine(str(row.query)); if (!p.title) return;
+    if (!str(row.query)) return;
     busy = "Searching…"; render();
-    searchFilm(p.title, p.year).then(function (res) { row.title = p.title; row.year = p.year; row.results = res; judge(row); busy = ""; render(); },
+    lookup(str(row.query)).then(function (f) { row.title = f.title; row.year = f.year; row.results = f.results; row.linked = f.linked; judge(row); busy = ""; render(); },
       function (e) { busy = ""; msg = tmdbError(e); render(); });
   }
   function undecided() { return review.filter(function (r) { return r.choice == null; }).length; }
@@ -139,7 +164,7 @@
       };
       out.push(h("article", { class: "card stack" },
         h("div", { class: "row" }, h("strong", null, "You typed: “" + row.line + "”"),
-          h("span", { class: "pill" + (row.status === "sure" ? " ok" : "") }, row.status === "sure" ? "One clear match" : row.status === "pick" ? "Several possible matches. Pick one." : "No match found")),
+          h("span", { class: "pill" + (row.status === "sure" || row.status === "link" ? " ok" : "") }, row.status === "link" ? "Fetched from your TMDB link" : row.status === "sure" ? "One clear match" : row.status === "pick" ? "Several possible matches. Pick one." : "No match found")),
         row.results.map(function (r) {
           return option(r.ref, [
             h("span", { class: "thumb" }, /^\/[\w.\-]+$/.test(r.poster) ? h("img", { src: "https://image.tmdb.org/t/p/w92" + r.poster, alt: "", loading: "lazy" }) : null),
@@ -150,7 +175,7 @@
         option("manual", h("span", { class: "cand-wide" }, "None of these. Add the title with no poster or details.")),
         option("skip", h("span", { class: "cand-wide" }, "Leave this one off the ballot.")),
         h("div", { class: "row" },
-          h("label", { class: "f", for: "requery-" + ri, style: "flex:1;min-width:200px" }, "Not seeing it? Change the title or add the year, then search again.",
+          h("label", { class: "f", for: "requery-" + ri, style: "flex:1;min-width:200px" }, "Not seeing it? Change the title or year, or paste the title’s TMDB page link, then search again.",
             h("input", { type: "text", id: "requery-" + ri, value: row.query, oninput: function (e) { row.query = e.target.value; } })),
           h("button", { class: "btn ghost", type: "button", disabled: !!busy, onclick: function () { searchAgain(row); } }, "Search again"))));
     });
@@ -195,7 +220,7 @@
     s.appendChild(h("h2", null, review ? "Check the matches" : "Add films"));
     if (review) reviewNodes().forEach(function (n) { s.appendChild(n); });
     else s.appendChild(h("div", { class: "card stack" },
-      h("label", { class: "f", for: "e-add" }, "One film or series per line. Add the year if the title is ambiguous.", h("textarea", { id: "e-add", placeholder: "Heat (1995)\nParasite\nThe Thing 1982" })),
+      h("label", { class: "f", for: "e-add" }, "One film or series per line. Add the year if the title is ambiguous. A TMDB page link also works as a line.", h("textarea", { id: "e-add", placeholder: "Heat (1995)\nParasite\nThe Thing 1982" })),
       h("div", { class: "row" }, h("button", { class: "btn", type: "button", disabled: !!busy, onclick: addFilms }, "Find these films"), busy ? h("span", { class: "muted small", role: "status" }, busy) : null),
       h("p", { class: "muted small" }, "You’ll confirm every match on the next step before anything is added."),
       msg ? h("p", { class: "note warn", role: "status" }, msg) : null));
