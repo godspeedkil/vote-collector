@@ -63,6 +63,10 @@ function savePoll_(body) {
       id: /^[a-z0-9]{2,20}$/i.test(String(m.id)) ? String(m.id) : 'm' + Utilities.getUuid().slice(0, 8),
       tmdbId: num_(m.tmdbId), kind: m.kind === 'tv' ? 'tv' : 'movie', seasons: num_(m.seasons), title: text_(m.title, 160), year: num_(m.year), runtime: num_(m.runtime),
       genre: text_(m.genre, 80), director: text_(m.director, 160), cast: text_(m.cast, 240), overview: text_(m.overview, 600),
+      people: (Array.isArray(m.people) ? m.people : []).slice(0, 5).map(function (p) {
+        p = p || {};
+        return { name: text_(p.name, 80), role: ['Director', 'Creator', 'Cast'].indexOf(p.role) >= 0 ? p.role : 'Cast', photo: /^\/[\w.\-]+$/.test(String(p.photo || '')) ? String(p.photo) : '' };
+      }).filter(function (p) { return p.name; }),
       poster: /^\/[\w.\-]+$/.test(String(m.poster || '')) ? String(m.poster) : '',
       trailer: /^[\w\-]{6,20}$/.test(String(m.trailer || '')) ? String(m.trailer) : ''
     };
@@ -77,6 +81,7 @@ function savePoll_(body) {
   if (json.length > 400000) return { ok: false, error: 'too_big' };
   const chunks = [];
   for (let i = 0; i < json.length; i += 40000) chunks.push([json.slice(i, i + 40000)]);
+  if (old && poll.pollId !== old.pollId) archiveResults_(old);
   const sh = sheet_('Poll');
   sh.clearContents();
   sh.getRange(1, 1, chunks.length, 1).setNumberFormat('@').setValues(chunks);
@@ -157,6 +162,18 @@ function writeResults_(poll) {
   });
   sh.getRange(1, 1, rows.length + 1, header.length).setNumberFormat('@').setValues([header].concat(rows));
   sh.setFrozenRows(1);
+}
+
+// When a new round starts, the previous round's Results tab is kept as its own tab.
+function archiveResults_(oldPoll) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const res = ss.getSheetByName('Results');
+    if (!res || res.getLastRow() < 2) return;
+    const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH.mm.ss');
+    const title = String(oldPoll.title || 'Poll').replace(/[:\\\/?*\[\]]/g, ' ').slice(0, 60);
+    res.copyTo(ss).setName(title + ' ' + stamp);
+  } catch (err) { /* keeping a copy must never block publishing; the Votes tab still has every row */ }
 }
 
 /* ---------- helpers ---------- */

@@ -65,7 +65,16 @@ Friends need no account. They can come back in the same browser and change their
 - **Your Google Sheet:** the `Results` tab has one row per person and one column per film for the current round. The `Votes` tab keeps every vote from every round as a backup.
 - If you ticked "Let friends see the results", the voting page gets a Results tab as well.
 
-For the next movie night, edit the list on the host page and tick **Start a new round** before publishing. Old votes stay in the `Votes` tab.
+## Starting a new poll
+
+On the host page press **Start a new poll**. That clears the list and keeps your rating choices. Add the new titles and publish. The old poll stays live until you publish.
+
+Your sheet is not wiped:
+
+- The `Votes` tab keeps every vote from every round.
+- The `Results` tab switches to the new round. The previous round's table is saved as its own tab, named after the old poll and the time.
+
+To change the current poll without starting over (fix a synopsis, add one title), just edit and press **Publish changes**. Existing votes are kept.
 
 ## Good to know
 

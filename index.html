@@ -7,12 +7,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div id="app"><p class="muted">Loading the ballot…</p></div>
-<script src="config.js?v=4"></script>
-<script src="common.js?v=4"></script>
+<script src="config.js?v=5"></script>
+<script src="common.js?v=5"></script>
 <script>
 (function () {
   "use strict";
@@ -60,13 +60,12 @@
     poll.movies.forEach(function (m, i) {
       var key = B.trailerKey(m);
       var slot = h("div", { class: "trailer", id: "trailer-" + m.id, hidden: !openTrailers[m.id] }, openTrailers[m.id] ? player(m, key) : null);
-      var people = [B.byline(m), m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ");
       s.appendChild(h("article", { class: "card film" },
         B.posterTile(m, i),
         h("div", { class: "film-body" },
           h("h3", null, m.title),
           B.facts(m) ? h("div", { class: "facts" }, B.facts(m)) : null,
-          people ? h("div", { class: "facts" }, people) : null,
+          B.peopleStrip(m),
           m.overview ? h("p", { class: "blurb" }, m.overview) : null,
           h("div", { class: "row" }, key
             ? h("button", { class: "btn ghost small", type: "button", onclick: function (e) {

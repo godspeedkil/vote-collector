@@ -8,12 +8,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div id="app"><p class="muted">Loading…</p></div>
-<script src="config.js?v=4"></script>
-<script src="common.js?v=4"></script>
+<script src="config.js?v=5"></script>
+<script src="common.js?v=5"></script>
 <script>
 (function () {
   "use strict";
@@ -43,18 +43,21 @@
     if (m && m[1].trim() && parseInt(m[2], 10) <= new Date().getFullYear() + 2) return { title: m[1].trim(), year: parseInt(m[2], 10) };
     return { title: s, year: null };
   }
-  function blank(p) { return { id: "m" + B.rid(), tmdbId: null, title: p.title, year: p.year, runtime: null, genre: "", director: "", cast: "", overview: "", poster: "", trailer: "", kind: "movie", seasons: null, alts: [], typed: "", missing: true }; }
+  function blank(p) { return { id: "m" + B.rid(), tmdbId: null, title: p.title, year: p.year, runtime: null, genre: "", director: "", cast: "", overview: "", poster: "", trailer: "", people: [], kind: "movie", seasons: null, alts: [], typed: "", missing: true }; }
   function refOf(m) { return (m.kind === "tv" ? "tv" : "movie") + "-" + m.tmdbId; }
   function fromDetails(d, keep, kind) {
     var tv = kind === "tv";
     var vids = ((d.videos && d.videos.results) || []).filter(function (v) { return v.site === "YouTube" && v.key; });
     var pick = vids.filter(function (v) { return v.type === "Trailer" && v.official; })[0] || vids.filter(function (v) { return v.type === "Trailer"; })[0] || vids.filter(function (v) { return v.type === "Teaser"; })[0];
     var crew = (d.credits && d.credits.crew) || [], cast = (d.credits && d.credits.cast) || [];
+    var leads = (tv ? (d.created_by || []) : crew.filter(function (c) { return c.job === "Director"; })).slice(0, 1);
+    var people = leads.map(function (c) { return { name: str(c.name), role: tv ? "Creator" : "Director", photo: str(c.profile_path) }; })
+      .concat(cast.slice(0, 3).map(function (c) { return { name: str(c.name), role: "Cast", photo: str(c.profile_path) }; }));
     return { id: keep.id, tmdbId: d.id, kind: kind, seasons: tv ? num(d.number_of_seasons) : null, title: str(tv ? d.name : d.title) || keep.title, year: num(String((tv ? d.first_air_date : d.release_date) || "").slice(0, 4)) || keep.year, runtime: tv ? null : num(d.runtime),
       genre: (d.genres || []).slice(0, 2).map(function (g) { return g.name; }).join(", "),
       director: (tv ? (d.created_by || []) : crew.filter(function (c) { return c.job === "Director"; })).slice(0, 2).map(function (c) { return c.name; }).join(", "),
       cast: cast.slice(0, 3).map(function (c) { return c.name; }).join(", "),
-      overview: str(d.overview).slice(0, 600), poster: str(d.poster_path), trailer: pick ? pick.key : "", alts: keep.alts || [], typed: keep.typed || "", missing: false };
+      overview: str(d.overview).slice(0, 600), people: people, poster: str(d.poster_path), trailer: pick ? pick.key : "", alts: keep.alts || [], typed: keep.typed || "", missing: false };
   }
   function details(ref, keep) {
     var k = String(ref).split("-"), kind = k[0] === "tv" ? "tv" : "movie";
@@ -206,7 +209,11 @@
   }
   function viewSetup() {
     var s = h("section", { class: "stack" });
-    if (live) s.appendChild(h("div", { class: "note ok stack" }, h("p", null, "Your poll is live. Send friends this link:"), h("p", { class: "share" }, h("a", { href: shareUrl }, shareUrl))));
+    if (live) s.appendChild(h("div", { class: "note ok stack" }, h("p", null, "Your poll is live. Send friends this link:"), h("p", { class: "share" }, h("a", { href: shareUrl }, shareUrl)),
+      edit.fresh ? h("p", null, "You’re setting up a new poll. The current one stays live until you publish. Reload the page to go back to it.")
+        : h("div", null, h("button", { class: "btn ghost small", type: "button", onclick: function () {
+            edit = { title: "", note: live.note, showResults: live.showResults, scale: live.scale.slice(), movies: [], newRound: true, fresh: true }; review = null; msg = null; render();
+          } }, "Start a new poll"))));
     s.appendChild(h("div", { class: "card stack" },
       h("p", { class: "muted small" }, "Both of these stay in this browser only. They are never part of the page your friends see."),
       h("div", { class: "grid2" },
@@ -244,7 +251,8 @@
                 busy = "Switching film…"; render();
                 details(id, m).then(function (nm) { edit.movies[edit.movies.indexOf(m)] = nm; busy = ""; render(); }, function () { busy = ""; msg = "That film couldn’t be loaded. Try again."; render(); });
               } }, m.alts.map(function (a) { return h("option", { value: a.ref, selected: a.ref === refOf(m) }, a.label); }))) : null,
-            h("div", { class: "facts" }, [B.facts(m), B.byline(m), m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ") || "No details yet"),
+            h("div", { class: "facts" }, B.facts(m) || "No details yet"),
+            B.peopleStrip(m),
             h("div", { class: "facts" }, B.trailerKey(m) ? "Trailer found" : "No trailer found; the card will link to a YouTube search instead"),
             m.tmdbId ? h("a", { class: "small", href: "https://www.themoviedb.org/" + (m.kind === "tv" ? "tv" : "movie") + "/" + m.tmdbId, target: "_blank", rel: "noopener noreferrer" }, "Check this film on TMDB") : null)),
         field("Synopsis", p + "overview", m.overview, function (v) { m.overview = v; }, { area: true })));
@@ -264,7 +272,8 @@
   function publish() {
     var movies = edit.movies.map(function (m) {
       return { id: m.id, tmdbId: m.tmdbId || null, kind: m.kind === "tv" ? "tv" : "movie", seasons: num(m.seasons), title: str(m.title).slice(0, 160), year: num(m.year), runtime: num(m.runtime), genre: str(m.genre), director: str(m.director), cast: str(m.cast),
-        overview: str(m.overview).slice(0, 600), poster: str(m.poster), trailer: str(m.trailer) };
+        overview: str(m.overview).slice(0, 600), poster: str(m.poster), trailer: str(m.trailer),
+        people: (Array.isArray(m.people) ? m.people : []).slice(0, 5).map(function (p) { return { name: str(p.name), role: str(p.role), photo: str(p.photo) }; }) };
     }).filter(function (m) { return m.title; });
     if (!movies.length) { msg = "Add at least one film before publishing."; render(); return; }
     if (edit.scale.length < 2) { msg = "Add at least two rating choices before publishing."; render(); return; }

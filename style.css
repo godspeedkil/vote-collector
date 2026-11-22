@@ -76,6 +76,13 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,button:focus-vis
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .cand-text{display:flex;flex-direction:column;gap:2px;min-width:0}
 .cand-wide{grid-column:2/-1}
+.people{display:flex;flex-wrap:wrap;gap:8px 16px}
+.person{display:flex;align-items:center;gap:8px;min-width:0}
+.face{width:44px;height:44px;border-radius:50%;overflow:hidden;background:var(--bg);border:1px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:.85rem;color:var(--muted)}
+.face img{width:100%;height:100%;object-fit:cover;display:block}
+.person-text{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+.person-name{font-weight:600;font-size:.9rem}
+.person-role{font-size:.75rem;color:var(--muted)}
 .scroll{overflow-x:auto}
 table{border-collapse:collapse;font-size:.9rem;width:100%}
 th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}

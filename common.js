@@ -48,6 +48,21 @@ var Ballot = (function () {
     return a.join(" · ");
   }
   function byline(m) { return m.director ? (m.kind === "tv" ? "Created by " : "Directed by ") + m.director : ""; }
+  // Compact strip of faces: director or creator first, then lead cast. Falls back to plain text for titles saved without people.
+  function peopleStrip(m) {
+    var list = Array.isArray(m.people) ? m.people.filter(function (p) { return p && str(p.name); }) : [];
+    if (!list.length) {
+      var line = [byline(m), m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ");
+      return line ? h("div", { class: "facts" }, line) : null;
+    }
+    return h("div", { class: "people" }, list.map(function (p) {
+      var name = str(p.name), initials = name.split(/\s+/).map(function (w) { return w.charAt(0); }).slice(0, 2).join("").toUpperCase();
+      var photo = /^\/[\w.\-]+$/.test(p.photo || "") ? "https://image.tmdb.org/t/p/w185" + p.photo : "";
+      return h("div", { class: "person" },
+        h("span", { class: "face" }, photo ? h("img", { src: photo, alt: "", loading: "lazy" }) : initials),
+        h("span", { class: "person-text" }, h("span", { class: "person-name" }, name), h("span", { class: "person-role" }, str(p.role) || "Cast")));
+    }));
+  }
   function reel(i) { return (i < 9 ? "0" : "") + (i + 1); }
   function posterTile(m, i, cls) {
     var u = posterUrl(m);
@@ -111,5 +126,5 @@ var Ballot = (function () {
   }
 
   return { ready: ready, h: h, str: str, num: num, rid: rid, scoreOf: scoreOf, get: get, post: post, posterUrl: posterUrl, trailerKey: trailerKey,
-    trailerSearch: trailerSearch, facts: facts, byline: byline, reel: reel, posterTile: posterTile, resultsNodes: resultsNodes, credit: credit };
+    trailerSearch: trailerSearch, facts: facts, byline: byline, peopleStrip: peopleStrip, reel: reel, posterTile: posterTile, resultsNodes: resultsNodes, credit: credit };
 })();
