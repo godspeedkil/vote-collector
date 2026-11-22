@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Movie Night Ballot host page</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app"><p class="muted">Loading…</p></div>
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  "use strict";
+  var B = Ballot, h = B.h, str = B.str, num = B.num;
+  var app = document.getElementById("app");
+  var view = "setup", live = null, edit = null, msg = null, busy = "", votes = null, votesMsg = null, review = null;
+  var keys = { pw: "", tmdb: "" };
+  try { keys = JSON.parse(localStorage.getItem("ballot:host") || "null") || keys; } catch (e) {}
+  function saveKeys() { try { localStorage.setItem("ballot:host", JSON.stringify(keys)); } catch (e) {} }
+  var shareUrl = location.href.replace(/[?#].*$/, "").replace(/admin\.html$/, "");
+
+  /* ---------- TMDB ---------- */
+  function tmdb(path, params) {
+    var key = str(keys.tmdb), u = new URL("https://api.themoviedb.org/3" + path), opt = {}, k;
+    for (k in params) if (params[k] != null && params[k] !== "") u.searchParams.set(k, params[k]);
+    if (key.length > 60) opt.headers = { Authorization: "Bearer " + key }; else u.searchParams.set("api_key", key);
+    return fetch(u.toString(), opt).then(function (r) {
+      if (r.status === 401) throw { code: "key" };
+      if (!r.ok) throw { code: "http" };
+      return r.json();
+    });
+  }
+  function parseLine(line) {
+    var s = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim();
+    var m = /^(.*?)[\s,\-–]*[\(\[]?((?:18|19|20)\d{2})[\)\]]?$/.exec(s);
+    if (m && m[1].trim() && parseInt(m[2], 10) <= new Date().getFullYear() + 2) return { title: m[1].trim(), year: parseInt(m[2], 10) };
+    return { title: s, year: null };
+  }
+  function blank(p) { return { id: "m" + B.rid(), tmdbId: null, title: p.title, year: p.year, runtime: null, genre: "", director: "", cast: "", overview: "", poster: "", trailer: "", alts: [], typed: "", missing: true }; }
+  function fromDetails(d, keep) {
+    var vids = ((d.videos && d.videos.results) || []).filter(function (v) { return v.site === "YouTube" && v.key; });
+    var pick = vids.filter(function (v) { return v.type === "Trailer" && v.official; })[0] || vids.filter(function (v) { return v.type === "Trailer"; })[0] || vids.filter(function (v) { return v.type === "Teaser"; })[0];
+    var crew = (d.credits && d.credits.crew) || [], cast = (d.credits && d.credits.cast) || [];
+    return { id: keep.id, tmdbId: d.id, title: str(d.title) || keep.title, year: num(String(d.release_date || "").slice(0, 4)) || keep.year, runtime: num(d.runtime),
+      genre: (d.genres || []).slice(0, 2).map(function (g) { return g.name; }).join(", "),
+      director: crew.filter(function (c) { return c.job === "Director"; }).slice(0, 2).map(function (c) { return c.name; }).join(", "),
+      cast: cast.slice(0, 3).map(function (c) { return c.name; }).join(", "),
+      overview: str(d.overview).slice(0, 600), poster: str(d.poster_path), trailer: pick ? pick.key : "", alts: keep.alts || [], typed: keep.typed || "", missing: false };
+  }
+  function details(id, keep) { return tmdb("/movie/" + id, { append_to_response: "videos,credits" }).then(function (d) { return fromDetails(d, keep); }); }
+  /* ---------- matching: nothing joins the ballot until you have confirmed which film each line means ---------- */
+  function slim(r) { return { id: r.id, title: str(r.title), year: num(String(r.release_date || "").slice(0, 4)), poster: str(r.poster_path), overview: str(r.overview) }; }
+  function norm(x) { return String(x).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+  function searchFilm(title, year) {
+    var run = function (y) { return tmdb("/search/movie", { query: title, year: y, include_adult: "false" }).then(function (r) { return (r.results || []).slice(0, 6).map(slim); }); };
+    return run(year).then(function (res) { return res.length || !year ? res : run(null); });
+  }
+  // Pre-selects a film only when exactly one result has the same title (and the same year, if you gave one). Anything else waits for your pick.
+  function judge(row) {
+    var sameTitle = row.results.filter(function (r) { return norm(r.title) === norm(row.title); });
+    var same = sameTitle.filter(function (r) { return !row.year || r.year === row.year; });
+    if (!row.results.length) { row.status = "none"; row.choice = null; }
+    else if (same.length === 1 && (row.year || sameTitle.length === 1)) { row.status = "sure"; row.choice = same[0].id; }
+    else { row.status = "pick"; row.choice = null; }
+  }
+  function tmdbError(e) { return e && e.code === "key" ? "TMDB rejected that key. Check you copied the whole API key, then try again." : "TMDB couldn’t be reached. Check your connection and try again."; }
+  function addFilms() {
+    var box = document.getElementById("e-add");
+    var lines = (box.value || "").split("\n").map(function (x) { return x.trim(); }).filter(Boolean).slice(0, 60);
+    if (!lines.length) { msg = "Type at least one film title first."; render(); return; }
+    if (!str(keys.tmdb)) { msg = "Add your TMDB key above first, so the films can be looked up."; render(); return; }
+    msg = null; var i = 0, rows = [];
+    (function next() {
+      if (i >= lines.length) { busy = ""; review = rows; render(); return; }
+      busy = "Searching " + (i + 1) + " of " + lines.length + "…"; render();
+      var keep = document.getElementById("e-add"); if (keep) keep.value = lines.join("\n");
+      var p = parseLine(lines[i]), row = { line: lines[i], query: lines[i], title: p.title, year: p.year, results: [], status: "none", choice: null };
+      searchFilm(p.title, p.year).then(function (res) { row.results = res; judge(row); rows.push(row); i++; next(); },
+        function (e) { busy = ""; msg = tmdbError(e); render(); var b = document.getElementById("e-add"); if (b) b.value = lines.join("\n"); });
+    })();
+  }
+  function searchAgain(row) {
+    var p = parseLine(str(row.query)); if (!p.title) return;
+    busy = "Searching…"; render();
+    searchFilm(p.title, p.year).then(function (res) { row.title = p.title; row.year = p.year; row.results = res; judge(row); busy = ""; render(); },
+      function (e) { busy = ""; msg = tmdbError(e); render(); });
+  }
+  function undecided() { return review.filter(function (r) { return r.choice == null; }).length; }
+  function reviewBarText() {
+    var n = undecided(), add = review.filter(function (r) { return r.choice != null && r.choice !== "skip"; }).length;
+    return n ? n + (n === 1 ? " film still needs" : " films still need") + " your choice" : add + (add === 1 ? " film" : " films") + " ready to add";
+  }
+  function updateReviewBar() {
+    var t = document.getElementById("review-count"), b = document.getElementById("review-add");
+    if (t) t.textContent = reviewBarText(); if (b) b.disabled = !!undecided() || !!busy;
+  }
+  function confirmReview() {
+    if (undecided()) return;
+    var rows = review.filter(function (r) { return r.choice !== "skip"; }), i = 0, dup = 0;
+    (function next() {
+      if (i >= rows.length) { busy = ""; review = null; msg = dup ? dup + (dup === 1 ? " film was" : " films were") + " already on the ballot and not added twice." : null; render(); return; }
+      var row = rows[i++], base = blank({ title: row.title, year: row.year });
+      base.typed = row.line;
+      base.alts = row.results.map(function (r) { return { id: r.id, label: r.title + (r.year ? " (" + r.year + ")" : "") }; });
+      if (row.choice === "manual") { edit.movies.push(base); next(); return; }
+      if (edit.movies.some(function (m) { return m.tmdbId === row.choice; })) { dup++; next(); return; }
+      busy = "Fetching details " + i + " of " + rows.length + "…"; render();
+      details(row.choice, base).then(function (m) { edit.movies.push(m); row.choice = "skip"; next(); },
+        function (e) { busy = ""; msg = tmdbError(e) + " The films not yet added are still listed below."; review = review.filter(function (r) { return r.choice !== "skip"; }); render(); });
+    })();
+  }
+  function reviewNodes() {
+    var out = [h("p", { class: "blurb" }, "Check each match before it goes on the ballot. A film is pre-selected only when exactly one result has the title you typed. Everything else waits for you to choose, and nothing is added or dropped until you press the button at the bottom.")];
+    review.forEach(function (row, ri) {
+      var name = "pick-" + ri;
+      var option = function (value, body) {
+        return h("label", { class: "cand" }, h("input", { type: "radio", name: name, id: name + "-" + value, checked: row.choice === value, onchange: function () { row.choice = value; updateReviewBar(); } }), body);
+      };
+      out.push(h("article", { class: "card stack" },
+        h("div", { class: "row" }, h("strong", null, "You typed: “" + row.line + "”"),
+          h("span", { class: "pill" + (row.status === "sure" ? " ok" : "") }, row.status === "sure" ? "One clear match" : row.status === "pick" ? "Several possible films. Pick one." : "No match found")),
+        row.results.map(function (r) {
+          return option(r.id, [
+            h("span", { class: "thumb" }, /^\/[\w.\-]+$/.test(r.poster) ? h("img", { src: "https://image.tmdb.org/t/p/w92" + r.poster, alt: "", loading: "lazy" }) : null),
+            h("span", { class: "cand-text" }, h("strong", null, r.title + (r.year ? " (" + r.year + ")" : " (year unknown)")),
+              h("span", { class: "muted small" }, r.overview ? (r.overview.length > 170 ? r.overview.slice(0, 170) + "…" : r.overview) : "No synopsis on TMDB"),
+              h("a", { class: "small", href: "https://www.themoviedb.org/movie/" + r.id, target: "_blank", rel: "noopener noreferrer" }, "Open on TMDB"))]);
+        }),
+        option("manual", h("span", { class: "cand-wide" }, "None of these. Add the title with no poster or details.")),
+        option("skip", h("span", { class: "cand-wide" }, "Leave this one off the ballot.")),
+        h("div", { class: "row" },
+          h("label", { class: "f", for: "requery-" + ri, style: "flex:1;min-width:200px" }, "Not seeing it? Change the title or add the year, then search again.",
+            h("input", { type: "text", id: "requery-" + ri, value: row.query, oninput: function (e) { row.query = e.target.value; } })),
+          h("button", { class: "btn ghost", type: "button", disabled: !!busy, onclick: function () { searchAgain(row); } }, "Search again"))));
+    });
+    out.push(h("div", { class: "card row" },
+      h("button", { class: "btn", type: "button", id: "review-add", disabled: !!undecided() || !!busy, onclick: confirmReview }, "Add these to the ballot"),
+      h("span", { class: "small", id: "review-count", role: "status" }, busy || reviewBarText()),
+      h("span", { style: "flex:1" }),
+      h("button", { class: "btn ghost small", type: "button", disabled: !!busy, onclick: function () { review = null; render(); } }, "Discard this list")));
+    if (msg) out.push(h("p", { class: "note warn", role: "status" }, msg));
+    return out;
+  }
+
+  /* ---------- render ---------- */
+  function field(label, id, value, on, o) {
+    o = o || {};
+    var input = o.area ? h("textarea", { id: id, placeholder: o.ph || null, oninput: function (e) { on(e.target.value); } }, value == null ? "" : String(value))
+      : h("input", { type: o.type || "text", id: id, value: value == null ? "" : String(value), placeholder: o.ph || null, autocomplete: o.auto || "off", oninput: function (e) { on(e.target.value); } });
+    return h("label", { class: "f", for: id }, label, input);
+  }
+  function render() {
+    app.textContent = "";
+    app.appendChild(h("header", { class: "head" }, h("span", { class: "kicker" }, "Host page"), h("h1", null, "Movie Night Ballot")));
+    app.appendChild(h("nav", { class: "tabs", "aria-label": "Sections" }, [["setup", "Set up the poll"], ["results", "Results"]].map(function (t) {
+      return h("button", { class: "tab", type: "button", "aria-current": view === t[0] ? "page" : null, onclick: function () { view = t[0]; if (view === "results") loadVotes(); render(); } }, t[1]);
+    })));
+    app.appendChild(view === "results" ? viewResults() : viewSetup());
+    app.appendChild(B.credit());
+  }
+  function viewSetup() {
+    var s = h("section", { class: "stack" });
+    if (live) s.appendChild(h("div", { class: "note ok stack" }, h("p", null, "Your poll is live. Send friends this link:"), h("p", { class: "share" }, h("a", { href: shareUrl }, shareUrl))));
+    s.appendChild(h("div", { class: "card stack" },
+      h("p", { class: "muted small" }, "Both of these stay in this browser only. They are never part of the page your friends see."),
+      h("div", { class: "grid2" },
+        field("Host password (the one you set in the script)", "k-pw", keys.pw, function (v) { keys.pw = v; saveKeys(); }, { type: "password", auto: "current-password" }),
+        field("TMDB API key", "k-tmdb", keys.tmdb, function (v) { keys.tmdb = v.trim(); saveKeys(); }, { type: "password" }))));
+    s.appendChild(h("div", { class: "card stack" },
+      field("Poll title", "e-title", edit.title, function (v) { edit.title = v; }, { ph: "October horror marathon" }),
+      field("Note to voters (optional)", "e-note", edit.note, function (v) { edit.note = v; }, { area: true }),
+      field("Rating choices, one per line. Choices that start with a number count toward the average; anything else, like “Didn’t watch”, is counted separately.", "e-scale", edit.scale.join("\n"),
+        function (v) { edit.scale = v.split("\n").map(function (x) { return x.trim().slice(0, 80); }).filter(Boolean); }, { area: true })));
+    s.appendChild(h("h2", null, review ? "Check the matches" : "Add films"));
+    if (review) reviewNodes().forEach(function (n) { s.appendChild(n); });
+    else s.appendChild(h("div", { class: "card stack" },
+      h("label", { class: "f", for: "e-add" }, "One film per line. Add the year if the title is ambiguous.", h("textarea", { id: "e-add", placeholder: "Heat (1995)\nParasite\nThe Thing 1982" })),
+      h("div", { class: "row" }, h("button", { class: "btn", type: "button", disabled: !!busy, onclick: addFilms }, "Find these films"), busy ? h("span", { class: "muted small", role: "status" }, busy) : null),
+      h("p", { class: "muted small" }, "You’ll confirm every match on the next step before anything is added."),
+      msg ? h("p", { class: "note warn", role: "status" }, msg) : null));
+    s.appendChild(h("h2", null, edit.movies.length + (edit.movies.length === 1 ? " film" : " films") + " on the ballot"));
+    edit.movies.forEach(function (m, i) {
+      var p = "e-" + m.id + "-";
+      s.appendChild(h("article", { class: "card stack" },
+        h("div", { class: "row" }, h("span", { class: "reel", "aria-hidden": "true" }, B.reel(i)),
+          m.missing ? h("span", { class: "pill" }, "No TMDB details. Added by title only.") : null,
+          m.typed ? h("span", { class: "muted small" }, "You typed: “" + m.typed + "”") : null,
+          h("span", { style: "flex:1" }),
+          i > 0 ? h("button", { class: "btn ghost small", type: "button", "aria-label": "Move " + m.title + " up", onclick: function () { edit.movies.splice(i - 1, 0, edit.movies.splice(i, 1)[0]); render(); } }, "Move up") : null,
+          h("button", { class: "btn ghost small", type: "button", "aria-label": "Remove " + m.title, onclick: function () { edit.movies.splice(i, 1); render(); } }, "Remove")),
+        h("div", { class: "row", style: "align-items:flex-start" },
+          B.posterTile(m, i, "sm"),
+          h("div", { class: "stack", style: "flex:1;min-width:220px" },
+            field("Title", p + "title", m.title, function (v) { m.title = v; }),
+            m.alts && m.alts.length > 1 ? h("label", { class: "f", for: p + "alt" }, "Wrong film? Pick the right one.",
+              h("select", { id: p + "alt", onchange: function (e) {
+                var id = num(e.target.value); if (!id) return;
+                busy = "Switching film…"; render();
+                details(id, m).then(function (nm) { edit.movies[edit.movies.indexOf(m)] = nm; busy = ""; render(); }, function () { busy = ""; msg = "That film couldn’t be loaded. Try again."; render(); });
+              } }, m.alts.map(function (a) { return h("option", { value: a.id, selected: a.id === m.tmdbId }, a.label); }))) : null,
+            h("div", { class: "facts" }, [B.facts(m), m.director ? "Directed by " + m.director : "", m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ") || "No details yet"),
+            h("div", { class: "facts" }, B.trailerKey(m) ? "Trailer found" : "No trailer found; the card will link to a YouTube search instead"),
+            m.tmdbId ? h("a", { class: "small", href: "https://www.themoviedb.org/movie/" + m.tmdbId, target: "_blank", rel: "noopener noreferrer" }, "Check this film on TMDB") : null)),
+        field("Synopsis", p + "overview", m.overview, function (v) { m.overview = v; }, { area: true })));
+    });
+    s.appendChild(h("div", { class: "card stack" },
+      h("label", { class: "check", for: "e-show" }, h("input", { type: "checkbox", id: "e-show", checked: !!edit.showResults, onchange: function (e) { edit.showResults = e.target.checked; } }), "Let friends see the results"),
+      live ? h("label", { class: "check", for: "e-round" }, h("input", { type: "checkbox", id: "e-round", checked: !!edit.newRound, onchange: function (e) { edit.newRound = e.target.checked; } }), "Start a new round. Earlier votes stay in your sheet but no longer count.") : null,
+      h("div", { class: "row" }, h("button", { class: "btn", type: "button", disabled: !!busy || !!review, onclick: publish }, live ? "Publish changes" : "Publish poll"),
+        review ? h("span", { class: "muted small" }, "Finish checking the matches above first.") : null)));
+    return s;
+  }
+  function adminError(code) {
+    return code === "bad_password" ? "That host password doesn’t match the one in your script."
+      : code === "set_password" ? "The script still has the default password. Change ADMIN_PASSWORD in the script, deploy a new version, then try again."
+      : code === "too_big" ? "The poll is too large to save. Remove a few films or shorten the synopses." : "That didn’t work. Try again in a moment.";
+  }
+  function publish() {
+    var movies = edit.movies.map(function (m) {
+      return { id: m.id, tmdbId: m.tmdbId || null, title: str(m.title).slice(0, 160), year: num(m.year), runtime: num(m.runtime), genre: str(m.genre), director: str(m.director), cast: str(m.cast),
+        overview: str(m.overview).slice(0, 600), poster: str(m.poster), trailer: str(m.trailer) };
+    }).filter(function (m) { return m.title; });
+    if (!movies.length) { msg = "Add at least one film before publishing."; render(); return; }
+    if (edit.scale.length < 2) { msg = "Add at least two rating choices before publishing."; render(); return; }
+    if (!str(keys.pw)) { msg = "Enter your host password at the top first."; render(); return; }
+    busy = "Publishing…"; msg = null; render();
+    B.post({ action: "savePoll", password: keys.pw, newRound: !!edit.newRound,
+      poll: { title: str(edit.title).slice(0, 120) || "Movie Night Ballot", note: str(edit.note).slice(0, 500), showResults: !!edit.showResults, scale: edit.scale.slice(0, 12), movies: movies } }).then(function (r) {
+      busy = "";
+      if (r && r.ok) { live = r.poll; startEdit(); votes = null; } else msg = adminError(r && r.error);
+      render(); window.scrollTo(0, 0);
+    }).catch(function () { busy = ""; msg = "The script couldn’t be reached. Check the URL in config.js and that the script is deployed for Anyone."; render(); });
+  }
+  function loadVotes() {
+    if (!str(keys.pw)) { votesMsg = "Enter your host password on the Set up tab first."; return; }
+    votesMsg = "Loading responses…";
+    B.post({ action: "adminResults", password: keys.pw }).then(function (r) {
+      if (r && r.ok) { votes = r.votes || []; votesMsg = null; } else votesMsg = adminError(r && r.error);
+      if (view === "results") render();
+    }).catch(function () { votesMsg = "The script couldn’t be reached. Try again in a moment."; if (view === "results") render(); });
+  }
+  function viewResults() {
+    var s = h("section", { class: "stack" });
+    if (!live) { s.appendChild(h("p", { class: "muted" }, "Publish a poll first.")); return s; }
+    if (votesMsg) s.appendChild(h("p", { class: "muted", role: "status" }, votesMsg));
+    if (votes) B.resultsNodes(live, votes, { onRemove: function (v, btn) {
+      if (btn.dataset.sure !== "1") { btn.dataset.sure = "1"; btn.textContent = "Confirm remove"; setTimeout(function () { btn.dataset.sure = ""; btn.textContent = "Remove"; }, 4000); return; }
+      btn.disabled = true;
+      B.post({ action: "deleteVote", password: keys.pw, voterKey: v.voterKey }).then(function (r) { if (r && r.ok) { votes = r.votes || []; } else votesMsg = adminError(r && r.error); render(); }, function () { votesMsg = "Couldn’t remove that response."; render(); });
+    } }).forEach(function (n) { s.appendChild(n); });
+    s.appendChild(h("div", { class: "row" }, h("button", { class: "btn ghost", type: "button", onclick: function () { loadVotes(); render(); } }, "Refresh"),
+      h("span", { class: "muted small" }, "Every response is also a row in your Google Sheet.")));
+    return s;
+  }
+  function startEdit() {
+    edit = live ? JSON.parse(JSON.stringify(live)) : { title: "", note: "Rate each film. Pick “Didn’t watch” for anything you skipped.", showResults: true, scale: ["1", "2", "3", "4", "5", "Didn’t watch"], movies: [] };
+    edit.movies.forEach(function (m) { m.alts = []; });
+    edit.newRound = false;
+  }
+
+  if (!B.ready()) { app.textContent = ""; app.appendChild(h("p", { class: "note warn" }, "Not connected yet. Open config.js, paste your Google Apps Script Web app URL into it, and upload it again. The README has the steps.")); return; }
+  B.get("poll").then(function (r) { live = (r && r.ok && r.poll) || null; startEdit(); render(); })
+    .catch(function () { startEdit(); msg = "The script couldn’t be reached. Check the URL in config.js and that the script is deployed with access set to Anyone."; render(); });
+})();
+</script>
+</body>
+</html>

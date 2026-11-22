@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Movie Night Ballot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app"><p class="muted">Loading the ballot…</p></div>
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  "use strict";
+  var B = Ballot, h = B.h, str = B.str;
+  var app = document.getElementById("app");
+  var poll = null, view = "vote", draft = null, submitState = null, votes = null, votesState = "idle", openTrailers = {};
+
+  function voterKey() {
+    var k = "";
+    try { k = localStorage.getItem("ballot:voter") || ""; } catch (e) {}
+    if (!/^[a-z0-9]{8,32}$/.test(k)) { k = B.rid() + B.rid(); try { localStorage.setItem("ballot:voter", k); } catch (e) {} }
+    return k;
+  }
+  var KEY = voterKey();
+  function loadDraft() {
+    var d = null;
+    try { d = JSON.parse(localStorage.getItem("ballot:draft:" + poll.pollId) || "null"); } catch (e) {}
+    if (!d || typeof d !== "object") d = {};
+    return { name: str(d.name), comment: str(d.comment), answers: (d.answers && typeof d.answers === "object") ? d.answers : {}, sent: !!d.sent };
+  }
+  function saveDraft() { try { localStorage.setItem("ballot:draft:" + poll.pollId, JSON.stringify(draft)); } catch (e) {} }
+  function answered() { var n = 0; poll.movies.forEach(function (m) { if (draft.answers[m.id]) n++; }); return n; }
+
+  function message(kind, nodes) { app.textContent = ""; app.appendChild(h("p", { class: "note " + kind }, nodes)); }
+
+  function render() {
+    app.textContent = "";
+    app.appendChild(h("header", { class: "head" },
+      h("span", { class: "kicker" }, poll.movies.length + (poll.movies.length === 1 ? " film" : " films") + " on the ballot"),
+      h("h1", null, poll.title || "Movie Night Ballot")));
+    if (poll.showResults) app.appendChild(h("nav", { class: "tabs", "aria-label": "Sections" }, [["vote", "Vote"], ["results", "Results"]].map(function (t) {
+      return h("button", { class: "tab", type: "button", "aria-current": view === t[0] ? "page" : null, onclick: function () { go(t[0]); } }, t[1]);
+    })));
+    app.appendChild(view === "results" && poll.showResults ? viewResults() : viewVote());
+    app.appendChild(B.credit());
+  }
+  function go(v) { view = v; if (v === "results") loadVotes(); render(); window.scrollTo(0, 0); }
+
+  function viewVote() {
+    var s = h("section", { class: "stack" });
+    if (poll.note) s.appendChild(h("p", { class: "blurb" }, poll.note));
+    if (draft.sent) s.appendChild(h("p", { class: "note ok" }, "Your vote is in. Change anything below and submit again to update it."));
+    s.appendChild(h("label", { class: "f", for: "voter-name" }, "Your name",
+      h("input", { type: "text", id: "voter-name", maxlength: "60", autocomplete: "name", value: draft.name, oninput: function (e) { draft.name = e.target.value; saveDraft(); } })));
+    poll.movies.forEach(function (m, i) {
+      var key = B.trailerKey(m);
+      var slot = h("div", { class: "trailer", id: "trailer-" + m.id, hidden: !openTrailers[m.id] }, openTrailers[m.id] ? player(m, key) : null);
+      var people = [m.director ? "Directed by " + m.director : "", m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ");
+      s.appendChild(h("article", { class: "card film" },
+        B.posterTile(m, i),
+        h("div", { class: "film-body" },
+          h("h3", null, m.title),
+          B.facts(m) ? h("div", { class: "facts" }, B.facts(m)) : null,
+          people ? h("div", { class: "facts" }, people) : null,
+          m.overview ? h("p", { class: "blurb" }, m.overview) : null,
+          h("div", { class: "row" }, key
+            ? h("button", { class: "btn ghost small", type: "button", onclick: function (e) {
+                openTrailers[m.id] = !openTrailers[m.id];
+                slot.hidden = !openTrailers[m.id]; slot.textContent = "";
+                if (openTrailers[m.id]) slot.appendChild(player(m, key));
+                e.target.textContent = openTrailers[m.id] ? "Close trailer" : "Play trailer";
+              } }, openTrailers[m.id] ? "Close trailer" : "Play trailer")
+            : h("a", { class: "small", href: B.trailerSearch(m), target: "_blank", rel: "noopener noreferrer" }, "Find the trailer on YouTube")),
+          h("fieldset", { class: "opts" }, h("legend", null, "Your rating for " + m.title),
+            poll.scale.map(function (label, j) {
+              return h("label", { class: "opt" },
+                h("input", { type: "radio", name: "r-" + m.id, id: "r-" + m.id + "-" + j, checked: draft.answers[m.id] === label, onchange: function () { draft.answers[m.id] = label; saveDraft(); progress(); } }),
+                h("span", null, label));
+            }))),
+        slot));
+    });
+    s.appendChild(h("label", { class: "f", for: "voter-comment" }, "Anything to add? (optional)",
+      h("textarea", { id: "voter-comment", maxlength: "600", oninput: function (e) { draft.comment = e.target.value; saveDraft(); } }, draft.comment)));
+    s.appendChild(h("div", { class: "row" },
+      h("button", { class: "btn", type: "button", id: "submit-btn", onclick: submit }, draft.sent ? "Update my vote" : "Submit my vote"),
+      h("span", { class: "muted small", id: "progress" }, answered() + " of " + poll.movies.length + " rated")));
+    s.appendChild(h("div", { id: "submit-out", role: "status" }, submitNode()));
+    return s;
+  }
+  function player(m, key) {
+    return h("iframe", { src: "https://www.youtube-nocookie.com/embed/" + key + "?autoplay=1&rel=0", title: "Trailer for " + m.title,
+      allow: "autoplay; encrypted-media; picture-in-picture; fullscreen", allowfullscreen: true, referrerpolicy: "strict-origin-when-cross-origin" });
+  }
+  function progress() { var p = document.getElementById("progress"); if (p) p.textContent = answered() + " of " + poll.movies.length + " rated"; }
+  function submitNode() {
+    var st = submitState; if (!st) return null;
+    if (st.kind === "busy") return h("p", { class: "muted" }, "Sending your vote…");
+    if (st.kind === "saved") return h("p", { class: "note ok" }, "Thanks, your vote is in. You can close this page.");
+    return h("p", { class: "note warn" }, st.msg);
+  }
+  function setSubmit(st) {
+    submitState = st;
+    var out = document.getElementById("submit-out"); if (out) { out.textContent = ""; var n = submitNode(); if (n) out.appendChild(n); }
+    var b = document.getElementById("submit-btn"); if (b) { b.disabled = st && st.kind === "busy"; if (st && st.kind === "saved") b.textContent = "Update my vote"; }
+  }
+  function submit() {
+    if (!draft.name.trim()) { setSubmit({ kind: "error", msg: "Add your name at the top so the host knows whose ratings these are." }); var n = document.getElementById("voter-name"); if (n) n.focus(); return; }
+    if (!answered()) { setSubmit({ kind: "error", msg: "Rate at least one film first." }); return; }
+    var a = {}; poll.movies.forEach(function (m) { if (draft.answers[m.id]) a[m.id] = draft.answers[m.id]; });
+    setSubmit({ kind: "busy" });
+    B.post({ action: "vote", pollId: poll.pollId, voterKey: KEY, name: draft.name.trim().slice(0, 60), comment: draft.comment.trim().slice(0, 600), answers: a }).then(function (r) {
+      if (r && r.ok) { draft.sent = true; saveDraft(); votes = null; setSubmit({ kind: "saved" }); return; }
+      var code = r && r.error;
+      setSubmit({ kind: "error", msg: code === "poll_changed" ? "The host changed the poll while you were voting. Reload the page and vote again."
+        : code === "full" ? "This poll isn’t taking more votes. Tell the host." : "Your vote wasn’t saved. Check your ratings and try again." });
+    }).catch(function () { setSubmit({ kind: "error", msg: "Your vote couldn’t be sent. Check your connection and press submit again. Your ratings are still here." }); });
+  }
+
+  function loadVotes() {
+    votesState = "loading";
+    B.get("results").then(function (r) { if (r && r.ok) { votes = r.votes || []; votesState = "ok"; } else votesState = "error"; if (view === "results") render(); })
+      .catch(function () { votesState = "error"; if (view === "results") render(); });
+  }
+  function viewResults() {
+    var s = h("section", { class: "stack" });
+    if (votesState === "error") s.appendChild(h("p", { class: "note warn" }, "Results couldn’t be loaded. Try again in a moment."));
+    if (votes) B.resultsNodes(poll, votes).forEach(function (n) { s.appendChild(n); });
+    else if (votesState === "loading") s.appendChild(h("p", { class: "muted" }, "Loading results…"));
+    s.appendChild(h("div", { class: "row" }, h("button", { class: "btn ghost", type: "button", disabled: votesState === "loading", onclick: function () { loadVotes(); render(); } }, "Refresh results")));
+    return s;
+  }
+
+  if (!B.ready()) { message("warn", ["This ballot isn’t connected yet. If you’re the host, finish the setup in the README, then open ", h("a", { href: "admin.html" }, "the host page"), "."]); return; }
+  B.get("poll").then(function (r) {
+    poll = r && r.ok && r.poll;
+    if (!poll || !Array.isArray(poll.movies) || !poll.movies.length) { message("warn", ["There’s no poll yet. If you’re the host, set one up on ", h("a", { href: "admin.html" }, "the host page"), "."]); return; }
+    document.title = poll.title || document.title;
+    draft = loadDraft();
+    render();
+  }).catch(function () { message("warn", "The ballot couldn’t be loaded. Check your connection and reload the page."); });
+})();
+</script>
+</body>
+</html>
