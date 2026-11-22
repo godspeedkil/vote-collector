@@ -86,29 +86,46 @@ var Ballot = (function () {
   // Results block used by both pages. opts.onRemove(vote, button) adds a Remove column for the host.
   function resultsNodes(poll, votes, opts) {
     opts = opts || {};
-    var out = [], rows = tally(poll, votes);
+    var out = [], rows = tally(poll, votes), items = {};
+    poll.movies.forEach(function (m) { items[m.id] = { key: (m.title + " " + (m.year || "")).toLowerCase(), els: [] }; });
+    var track = function (m, el) { items[m.id].els.push(el); return el; };
     var scores = poll.scale.map(scoreOf).filter(function (x) { return x != null; });
     var max = scores.length ? Math.max.apply(null, scores) : null;
     out.push(h("div", { class: "row" }, h("h2", null, votes.length + (votes.length === 1 ? " response" : " responses")),
       max != null ? h("span", { class: "muted small" }, "Ranked by average rating, out of " + max) : null));
+    if (opts.search && poll.movies.length > 1) {
+      var count = h("span", { class: "muted small", role: "status" });
+      out.push(h("div", { class: "row" },
+        h("label", { class: "f", for: "result-filter", style: "flex:1;min-width:220px" }, "Find a title",
+          h("input", { type: "text", id: "result-filter", placeholder: "Type part of a title", autocomplete: "off", oninput: function (e) {
+            var words = e.target.value.toLowerCase().split(/\s+/).filter(Boolean), shown = 0, id;
+            for (id in items) {
+              var ok = words.every(function (w) { return items[id].key.indexOf(w) >= 0; });
+              items[id].els.forEach(function (el) { el.hidden = !ok; });
+              if (ok) shown++;
+            }
+            count.textContent = words.length ? shown + " of " + poll.movies.length + " titles match" : "";
+          } })),
+        count));
+    }
     rows.forEach(function (r, i) {
       var chips = [];
       poll.scale.forEach(function (l) { if (r.counts[l]) chips.push(h("span", { class: "chip" }, l + " × " + r.counts[l])); });
-      out.push(h("article", { class: "card rank" },
+      out.push(track(r.m, h("article", { class: "card rank" },
         h("div", { class: "reel", "aria-hidden": "true" }, reel(i)),
         h("div", { class: "film-body" },
           h("h3", null, r.m.title + (r.m.year ? " (" + r.m.year + ")" : "")),
           (max && r.avg != null) ? h("div", { class: "bar", role: "img", "aria-label": "Average " + r.avg.toFixed(1) + " out of " + max }, h("i", { style: "width:" + Math.max(0, Math.min(100, r.avg / max * 100)).toFixed(1) + "%" })) : null,
           chips.length ? h("div", { class: "chips" }, chips) : h("div", { class: "muted small" }, "No ratings yet")),
-        h("div", null, h("div", { class: "avg" }, r.avg != null ? r.avg.toFixed(1) : "–"), h("div", { class: "muted small" }, r.n + " rated"))));
+        h("div", null, h("div", { class: "avg" }, r.avg != null ? r.avg.toFixed(1) : "–"), h("div", { class: "muted small" }, r.n + " rated")))));
     });
     if (votes.length) {
       out.push(h("h2", null, "Everyone’s ratings"));
       out.push(h("div", { class: "card scroll" }, h("table", null,
-        h("thead", null, h("tr", null, h("th", null, "Name"), poll.movies.map(function (m) { return h("th", null, m.title); }), opts.onRemove ? h("th", null, "") : null)),
+        h("thead", null, h("tr", null, h("th", null, "Name"), poll.movies.map(function (m) { return track(m, h("th", null, m.title)); }), opts.onRemove ? h("th", null, "") : null)),
         h("tbody", null, votes.map(function (v) {
           return h("tr", null, h("td", null, str(v.name) || "Someone"),
-            poll.movies.map(function (m) { return h("td", { class: "n" }, str(v.answers && v.answers[m.id]) || "–"); }),
+            poll.movies.map(function (m) { return track(m, h("td", { class: "n" }, str(v.answers && v.answers[m.id]) || "–")); }),
             opts.onRemove ? h("td", null, h("button", { class: "btn ghost small", type: "button", onclick: function (e) { opts.onRemove(v, e.target); } }, "Remove")) : null);
         })))));
       var notes = votes.filter(function (v) { return str(v.comment); });

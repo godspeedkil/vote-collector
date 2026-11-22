@@ -8,12 +8,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <div id="app"><p class="muted">Loading…</p></div>
-<script src="config.js?v=5"></script>
-<script src="common.js?v=5"></script>
+<script src="config.js?v=6"></script>
+<script src="common.js?v=6"></script>
 <script>
 (function () {
   "use strict";
@@ -298,7 +298,7 @@
     var s = h("section", { class: "stack" });
     if (!live) { s.appendChild(h("p", { class: "muted" }, "Publish a poll first.")); return s; }
     if (votesMsg) s.appendChild(h("p", { class: "muted", role: "status" }, votesMsg));
-    if (votes) B.resultsNodes(live, votes, { onRemove: function (v, btn) {
+    if (votes) B.resultsNodes(live, votes, { search: true, onRemove: function (v, btn) {
       if (btn.dataset.sure !== "1") { btn.dataset.sure = "1"; btn.textContent = "Confirm remove"; setTimeout(function () { btn.dataset.sure = ""; btn.textContent = "Remove"; }, 4000); return; }
       btn.disabled = true;
       B.post({ action: "deleteVote", password: keys.pw, voterKey: v.voterKey }).then(function (r) { if (r && r.ok) { votes = r.votes || []; } else votesMsg = adminError(r && r.error); render(); }, function () { votesMsg = "Couldn’t remove that response."; render(); });

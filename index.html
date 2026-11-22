@@ -7,12 +7,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <div id="app"><p class="muted">Loading the ballot…</p></div>
-<script src="config.js?v=5"></script>
-<script src="common.js?v=5"></script>
+<script src="config.js?v=6"></script>
+<script src="common.js?v=6"></script>
 <script>
 (function () {
   "use strict";
@@ -47,7 +47,9 @@
       return h("button", { class: "tab", type: "button", "aria-current": view === t[0] ? "page" : null, onclick: function () { go(t[0]); } }, t[1]);
     })));
     app.appendChild(view === "results" && poll.showResults ? viewResults() : viewVote());
-    app.appendChild(B.credit());
+    var foot = B.credit();
+    foot.appendChild(h("span", null, " · ", h("a", { href: "admin.html" }, "Host page")));
+    app.appendChild(foot);
   }
   function go(v) { view = v; if (v === "results") loadVotes(); render(); window.scrollTo(0, 0); }
 
