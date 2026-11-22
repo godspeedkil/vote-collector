@@ -41,7 +41,7 @@
   function render() {
     app.textContent = "";
     app.appendChild(h("header", { class: "head" },
-      h("span", { class: "kicker" }, poll.movies.length + (poll.movies.length === 1 ? " film" : " films") + " on the ballot"),
+      h("span", { class: "kicker" }, poll.movies.length + (poll.movies.length === 1 ? " title" : " titles") + " on the ballot"),
       h("h1", null, poll.title || "Movie Night Ballot")));
     if (poll.showResults) app.appendChild(h("nav", { class: "tabs", "aria-label": "Sections" }, [["vote", "Vote"], ["results", "Results"]].map(function (t) {
       return h("button", { class: "tab", type: "button", "aria-current": view === t[0] ? "page" : null, onclick: function () { go(t[0]); } }, t[1]);
@@ -60,7 +60,7 @@
     poll.movies.forEach(function (m, i) {
       var key = B.trailerKey(m);
       var slot = h("div", { class: "trailer", id: "trailer-" + m.id, hidden: !openTrailers[m.id] }, openTrailers[m.id] ? player(m, key) : null);
-      var people = [m.director ? "Directed by " + m.director : "", m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ");
+      var people = [B.byline(m), m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ");
       s.appendChild(h("article", { class: "card film" },
         B.posterTile(m, i),
         h("div", { class: "film-body" },
@@ -110,7 +110,7 @@
   }
   function submit() {
     if (!draft.name.trim()) { setSubmit({ kind: "error", msg: "Add your name at the top so the host knows whose ratings these are." }); var n = document.getElementById("voter-name"); if (n) n.focus(); return; }
-    if (!answered()) { setSubmit({ kind: "error", msg: "Rate at least one film first." }); return; }
+    if (!answered()) { setSubmit({ kind: "error", msg: "Rate at least one title first." }); return; }
     var a = {}; poll.movies.forEach(function (m) { if (draft.answers[m.id]) a[m.id] = draft.answers[m.id]; });
     setSubmit({ kind: "busy" });
     B.post({ action: "vote", pollId: poll.pollId, voterKey: KEY, name: draft.name.trim().slice(0, 60), comment: draft.comment.trim().slice(0, 600), answers: a }).then(function (r) {

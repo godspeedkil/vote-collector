@@ -39,7 +39,15 @@ var Ballot = (function () {
   function posterUrl(m, size) { return /^\/[\w.\-]+$/.test(m.poster || "") ? "https://image.tmdb.org/t/p/" + (size || "w342") + m.poster : ""; }
   function trailerKey(m) { return /^[\w\-]{6,20}$/.test(m.trailer || "") ? m.trailer : ""; }
   function trailerSearch(m) { return "https://www.youtube.com/results?search_query=" + encodeURIComponent(m.title + (m.year ? " " + m.year : "") + " official trailer"); }
-  function facts(m) { var a = []; if (m.year) a.push(m.year); if (m.runtime) a.push(m.runtime + " min"); if (m.genre) a.push(m.genre); return a.join(" · "); }
+  function facts(m) {
+    var a = [];
+    if (m.year) a.push(m.year);
+    if (m.kind === "tv") a.push("Series" + (m.seasons ? ", " + m.seasons + (m.seasons === 1 ? " season" : " seasons") : ""));
+    if (m.runtime) a.push(m.runtime + " min");
+    if (m.genre) a.push(m.genre);
+    return a.join(" · ");
+  }
+  function byline(m) { return m.director ? (m.kind === "tv" ? "Created by " : "Directed by ") + m.director : ""; }
   function reel(i) { return (i < 9 ? "0" : "") + (i + 1); }
   function posterTile(m, i, cls) {
     var u = posterUrl(m);
@@ -103,5 +111,5 @@ var Ballot = (function () {
   }
 
   return { ready: ready, h: h, str: str, num: num, rid: rid, scoreOf: scoreOf, get: get, post: post, posterUrl: posterUrl, trailerKey: trailerKey,
-    trailerSearch: trailerSearch, facts: facts, reel: reel, posterTile: posterTile, resultsNodes: resultsNodes, credit: credit };
+    trailerSearch: trailerSearch, facts: facts, byline: byline, reel: reel, posterTile: posterTile, resultsNodes: resultsNodes, credit: credit };
 })();

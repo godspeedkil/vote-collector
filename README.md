@@ -49,8 +49,8 @@ Open `config.js` in any text editor and replace `PASTE_YOUR_WEB_APP_URL_HERE` wi
 1. Open `https://YOUR-USERNAME.github.io/movie-ballot/admin.html`.
 2. Enter your host password and TMDB key. They are remembered in that browser only.
 3. Set the title and the rating choices, one per line. Choices that start with a number count toward the average. Anything else, such as "Didn't watch", is counted separately.
-4. Paste your films, one per line, with or without the year, and press **Find these films**.
-5. Check the matches. Each line you typed is shown with the films TMDB found for it, with poster, year and synopsis.
+4. Paste your films and series, one per line, with or without the year, and press **Find these films**.
+5. Check the matches. Each line you typed is shown with the films and series TMDB found for it, with poster, year and synopsis.
    - A film is pre-selected only when exactly one result has the title (and year) you typed.
    - Where several films fit, or none do, you have to choose: pick one, search again with a different title or year, add the title with no details, or leave it off.
    - Nothing is added or dropped until every line has a choice and you press **Add these to the ballot**.

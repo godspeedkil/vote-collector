@@ -42,23 +42,38 @@
     if (m && m[1].trim() && parseInt(m[2], 10) <= new Date().getFullYear() + 2) return { title: m[1].trim(), year: parseInt(m[2], 10) };
     return { title: s, year: null };
   }
-  function blank(p) { return { id: "m" + B.rid(), tmdbId: null, title: p.title, year: p.year, runtime: null, genre: "", director: "", cast: "", overview: "", poster: "", trailer: "", alts: [], typed: "", missing: true }; }
-  function fromDetails(d, keep) {
+  function blank(p) { return { id: "m" + B.rid(), tmdbId: null, title: p.title, year: p.year, runtime: null, genre: "", director: "", cast: "", overview: "", poster: "", trailer: "", kind: "movie", seasons: null, alts: [], typed: "", missing: true }; }
+  function refOf(m) { return (m.kind === "tv" ? "tv" : "movie") + "-" + m.tmdbId; }
+  function fromDetails(d, keep, kind) {
+    var tv = kind === "tv";
     var vids = ((d.videos && d.videos.results) || []).filter(function (v) { return v.site === "YouTube" && v.key; });
     var pick = vids.filter(function (v) { return v.type === "Trailer" && v.official; })[0] || vids.filter(function (v) { return v.type === "Trailer"; })[0] || vids.filter(function (v) { return v.type === "Teaser"; })[0];
     var crew = (d.credits && d.credits.crew) || [], cast = (d.credits && d.credits.cast) || [];
-    return { id: keep.id, tmdbId: d.id, title: str(d.title) || keep.title, year: num(String(d.release_date || "").slice(0, 4)) || keep.year, runtime: num(d.runtime),
+    return { id: keep.id, tmdbId: d.id, kind: kind, seasons: tv ? num(d.number_of_seasons) : null, title: str(tv ? d.name : d.title) || keep.title, year: num(String((tv ? d.first_air_date : d.release_date) || "").slice(0, 4)) || keep.year, runtime: tv ? null : num(d.runtime),
       genre: (d.genres || []).slice(0, 2).map(function (g) { return g.name; }).join(", "),
-      director: crew.filter(function (c) { return c.job === "Director"; }).slice(0, 2).map(function (c) { return c.name; }).join(", "),
+      director: (tv ? (d.created_by || []) : crew.filter(function (c) { return c.job === "Director"; })).slice(0, 2).map(function (c) { return c.name; }).join(", "),
       cast: cast.slice(0, 3).map(function (c) { return c.name; }).join(", "),
       overview: str(d.overview).slice(0, 600), poster: str(d.poster_path), trailer: pick ? pick.key : "", alts: keep.alts || [], typed: keep.typed || "", missing: false };
   }
-  function details(id, keep) { return tmdb("/movie/" + id, { append_to_response: "videos,credits" }).then(function (d) { return fromDetails(d, keep); }); }
+  function details(ref, keep) {
+    var k = String(ref).split("-"), kind = k[0] === "tv" ? "tv" : "movie";
+    return tmdb("/" + kind + "/" + k[1], { append_to_response: "videos,credits" }).then(function (d) { return fromDetails(d, keep, kind); });
+  }
   /* ---------- matching: nothing joins the ballot until you have confirmed which film each line means ---------- */
-  function slim(r) { return { id: r.id, title: str(r.title), year: num(String(r.release_date || "").slice(0, 4)), poster: str(r.poster_path), overview: str(r.overview) }; }
+  function slim(r, kind) {
+    var tv = kind === "tv";
+    return { id: r.id, kind: kind, ref: kind + "-" + r.id, title: str(tv ? r.name : r.title), year: num(String((tv ? r.first_air_date : r.release_date) || "").slice(0, 4)), poster: str(r.poster_path), overview: str(r.overview), pop: +r.popularity || 0 };
+  }
   function norm(x) { return String(x).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
   function searchFilm(title, year) {
-    var run = function (y) { return tmdb("/search/movie", { query: title, year: y, include_adult: "false" }).then(function (r) { return (r.results || []).slice(0, 6).map(slim); }); };
+    // Films and series are searched together, then listed most popular first.
+    var run = function (y) {
+      return Promise.all([tmdb("/search/movie", { query: title, year: y, include_adult: "false" }), tmdb("/search/tv", { query: title, first_air_date_year: y, include_adult: "false" })]).then(function (a) {
+        return (a[0].results || []).slice(0, 6).map(function (r) { return slim(r, "movie"); })
+          .concat((a[1].results || []).slice(0, 6).map(function (r) { return slim(r, "tv"); }))
+          .sort(function (x, z) { return z.pop - x.pop; }).slice(0, 8);
+      });
+    };
     return run(year).then(function (res) { return res.length || !year ? res : run(null); });
   }
   // Pre-selects a film only when exactly one result has the same title (and the same year, if you gave one). Anything else waits for your pick.
@@ -66,7 +81,7 @@
     var sameTitle = row.results.filter(function (r) { return norm(r.title) === norm(row.title); });
     var same = sameTitle.filter(function (r) { return !row.year || r.year === row.year; });
     if (!row.results.length) { row.status = "none"; row.choice = null; }
-    else if (same.length === 1 && (row.year || sameTitle.length === 1)) { row.status = "sure"; row.choice = same[0].id; }
+    else if (same.length === 1 && (row.year || sameTitle.length === 1)) { row.status = "sure"; row.choice = same[0].ref; }
     else { row.status = "pick"; row.choice = null; }
   }
   function tmdbError(e) { return e && e.code === "key" ? "TMDB rejected that key. Check you copied the whole API key, then try again." : "TMDB couldn’t be reached. Check your connection and try again."; }
@@ -107,16 +122,16 @@
       if (i >= rows.length) { busy = ""; review = null; msg = dup ? dup + (dup === 1 ? " film was" : " films were") + " already on the ballot and not added twice." : null; render(); return; }
       var row = rows[i++], base = blank({ title: row.title, year: row.year });
       base.typed = row.line;
-      base.alts = row.results.map(function (r) { return { id: r.id, label: r.title + (r.year ? " (" + r.year + ")" : "") }; });
+      base.alts = row.results.map(function (r) { return { ref: r.ref, label: r.title + (r.year ? " (" + r.year + ")" : "") + (r.kind === "tv" ? ", series" : ", film") }; });
       if (row.choice === "manual") { edit.movies.push(base); next(); return; }
-      if (edit.movies.some(function (m) { return m.tmdbId === row.choice; })) { dup++; next(); return; }
+      if (edit.movies.some(function (m) { return m.tmdbId && refOf(m) === row.choice; })) { dup++; next(); return; }
       busy = "Fetching details " + i + " of " + rows.length + "…"; render();
       details(row.choice, base).then(function (m) { edit.movies.push(m); row.choice = "skip"; next(); },
         function (e) { busy = ""; msg = tmdbError(e) + " The films not yet added are still listed below."; review = review.filter(function (r) { return r.choice !== "skip"; }); render(); });
     })();
   }
   function reviewNodes() {
-    var out = [h("p", { class: "blurb" }, "Check each match before it goes on the ballot. A film is pre-selected only when exactly one result has the title you typed. Everything else waits for you to choose, and nothing is added or dropped until you press the button at the bottom.")];
+    var out = [h("p", { class: "blurb" }, "Check each match before it goes on the ballot. Films and series are both searched. A title is pre-selected only when exactly one result has the title you typed. Everything else waits for you to choose, and nothing is added or dropped until you press the button at the bottom.")];
     review.forEach(function (row, ri) {
       var name = "pick-" + ri;
       var option = function (value, body) {
@@ -124,13 +139,13 @@
       };
       out.push(h("article", { class: "card stack" },
         h("div", { class: "row" }, h("strong", null, "You typed: “" + row.line + "”"),
-          h("span", { class: "pill" + (row.status === "sure" ? " ok" : "") }, row.status === "sure" ? "One clear match" : row.status === "pick" ? "Several possible films. Pick one." : "No match found")),
+          h("span", { class: "pill" + (row.status === "sure" ? " ok" : "") }, row.status === "sure" ? "One clear match" : row.status === "pick" ? "Several possible matches. Pick one." : "No match found")),
         row.results.map(function (r) {
-          return option(r.id, [
+          return option(r.ref, [
             h("span", { class: "thumb" }, /^\/[\w.\-]+$/.test(r.poster) ? h("img", { src: "https://image.tmdb.org/t/p/w92" + r.poster, alt: "", loading: "lazy" }) : null),
-            h("span", { class: "cand-text" }, h("strong", null, r.title + (r.year ? " (" + r.year + ")" : " (year unknown)")),
+            h("span", { class: "cand-text" }, h("strong", null, r.title + (r.year ? " (" + r.year + ")" : " (year unknown)") + (r.kind === "tv" ? " · Series" : " · Film")),
               h("span", { class: "muted small" }, r.overview ? (r.overview.length > 170 ? r.overview.slice(0, 170) + "…" : r.overview) : "No synopsis on TMDB"),
-              h("a", { class: "small", href: "https://www.themoviedb.org/movie/" + r.id, target: "_blank", rel: "noopener noreferrer" }, "Open on TMDB"))]);
+              h("a", { class: "small", href: "https://www.themoviedb.org/" + r.kind + "/" + r.id, target: "_blank", rel: "noopener noreferrer" }, "Open on TMDB"))]);
         }),
         option("manual", h("span", { class: "cand-wide" }, "None of these. Add the title with no poster or details.")),
         option("skip", h("span", { class: "cand-wide" }, "Leave this one off the ballot.")),
@@ -180,11 +195,11 @@
     s.appendChild(h("h2", null, review ? "Check the matches" : "Add films"));
     if (review) reviewNodes().forEach(function (n) { s.appendChild(n); });
     else s.appendChild(h("div", { class: "card stack" },
-      h("label", { class: "f", for: "e-add" }, "One film per line. Add the year if the title is ambiguous.", h("textarea", { id: "e-add", placeholder: "Heat (1995)\nParasite\nThe Thing 1982" })),
+      h("label", { class: "f", for: "e-add" }, "One film or series per line. Add the year if the title is ambiguous.", h("textarea", { id: "e-add", placeholder: "Heat (1995)\nParasite\nThe Thing 1982" })),
       h("div", { class: "row" }, h("button", { class: "btn", type: "button", disabled: !!busy, onclick: addFilms }, "Find these films"), busy ? h("span", { class: "muted small", role: "status" }, busy) : null),
       h("p", { class: "muted small" }, "You’ll confirm every match on the next step before anything is added."),
       msg ? h("p", { class: "note warn", role: "status" }, msg) : null));
-    s.appendChild(h("h2", null, edit.movies.length + (edit.movies.length === 1 ? " film" : " films") + " on the ballot"));
+    s.appendChild(h("h2", null, edit.movies.length + (edit.movies.length === 1 ? " title" : " titles") + " on the ballot"));
     edit.movies.forEach(function (m, i) {
       var p = "e-" + m.id + "-";
       s.appendChild(h("article", { class: "card stack" },
@@ -198,15 +213,15 @@
           B.posterTile(m, i, "sm"),
           h("div", { class: "stack", style: "flex:1;min-width:220px" },
             field("Title", p + "title", m.title, function (v) { m.title = v; }),
-            m.alts && m.alts.length > 1 ? h("label", { class: "f", for: p + "alt" }, "Wrong film? Pick the right one.",
+            m.alts && m.alts.length > 1 ? h("label", { class: "f", for: p + "alt" }, "Wrong title? Pick the right one.",
               h("select", { id: p + "alt", onchange: function (e) {
-                var id = num(e.target.value); if (!id) return;
+                var id = e.target.value; if (!id) return;
                 busy = "Switching film…"; render();
                 details(id, m).then(function (nm) { edit.movies[edit.movies.indexOf(m)] = nm; busy = ""; render(); }, function () { busy = ""; msg = "That film couldn’t be loaded. Try again."; render(); });
-              } }, m.alts.map(function (a) { return h("option", { value: a.id, selected: a.id === m.tmdbId }, a.label); }))) : null,
-            h("div", { class: "facts" }, [B.facts(m), m.director ? "Directed by " + m.director : "", m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ") || "No details yet"),
+              } }, m.alts.map(function (a) { return h("option", { value: a.ref, selected: a.ref === refOf(m) }, a.label); }))) : null,
+            h("div", { class: "facts" }, [B.facts(m), B.byline(m), m.cast ? "With " + m.cast : ""].filter(Boolean).join(" · ") || "No details yet"),
             h("div", { class: "facts" }, B.trailerKey(m) ? "Trailer found" : "No trailer found; the card will link to a YouTube search instead"),
-            m.tmdbId ? h("a", { class: "small", href: "https://www.themoviedb.org/movie/" + m.tmdbId, target: "_blank", rel: "noopener noreferrer" }, "Check this film on TMDB") : null)),
+            m.tmdbId ? h("a", { class: "small", href: "https://www.themoviedb.org/" + (m.kind === "tv" ? "tv" : "movie") + "/" + m.tmdbId, target: "_blank", rel: "noopener noreferrer" }, "Check this film on TMDB") : null)),
         field("Synopsis", p + "overview", m.overview, function (v) { m.overview = v; }, { area: true })));
     });
     s.appendChild(h("div", { class: "card stack" },
@@ -223,7 +238,7 @@
   }
   function publish() {
     var movies = edit.movies.map(function (m) {
-      return { id: m.id, tmdbId: m.tmdbId || null, title: str(m.title).slice(0, 160), year: num(m.year), runtime: num(m.runtime), genre: str(m.genre), director: str(m.director), cast: str(m.cast),
+      return { id: m.id, tmdbId: m.tmdbId || null, kind: m.kind === "tv" ? "tv" : "movie", seasons: num(m.seasons), title: str(m.title).slice(0, 160), year: num(m.year), runtime: num(m.runtime), genre: str(m.genre), director: str(m.director), cast: str(m.cast),
         overview: str(m.overview).slice(0, 600), poster: str(m.poster), trailer: str(m.trailer) };
     }).filter(function (m) { return m.title; });
     if (!movies.length) { msg = "Add at least one film before publishing."; render(); return; }
