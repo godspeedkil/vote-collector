@@ -61,7 +61,7 @@ function savePoll_(body) {
     m = m || {};
     return {
       id: /^[a-z0-9]{2,20}$/i.test(String(m.id)) ? String(m.id) : 'm' + Utilities.getUuid().slice(0, 8),
-      tmdbId: num_(m.tmdbId), title: text_(m.title, 160), year: num_(m.year), runtime: num_(m.runtime),
+      tmdbId: num_(m.tmdbId), kind: m.kind === 'tv' ? 'tv' : 'movie', seasons: num_(m.seasons), title: text_(m.title, 160), year: num_(m.year), runtime: num_(m.runtime),
       genre: text_(m.genre, 80), director: text_(m.director, 160), cast: text_(m.cast, 240), overview: text_(m.overview, 600),
       poster: /^\/[\w.\-]+$/.test(String(m.poster || '')) ? String(m.poster) : '',
       trailer: /^[\w\-]{6,20}$/.test(String(m.trailer || '')) ? String(m.trailer) : ''
